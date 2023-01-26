@@ -43,6 +43,7 @@ extensions = ['myst_parser',
               'sphinxcontrib.openapi',
               'sphinx_tabs.tabs',
               'sphinxcontrib.googleanalytics',
+              'sphinxcontrib.mermaid',
               'sphinxcontrib.spelling',
               'versionwarning.extension']
 
