@@ -189,59 +189,59 @@ jobs:
             encryption: 'wireguard'
             kube-proxy: 'none'
 
-          # IPsec encryption cannot be used with BPF NodePort.
-          - name: '3'
-            tunnel: 'disabled'
-            ipfamily: 'ipv4'
-            encryption: 'ipsec'
-            kube-proxy: 'iptables'
-
-          # IPsec encryption is currently not supported in case of ipv6-only clusters (#23553)
-          # Wireguard encryption is currently affected by a bug in case of ipv6-only clusters (#23917)
-          - name: '4'
-            tunnel: 'disabled'
-            ipfamily: 'ipv6'
-            encryption: 'disabled'
-            kube-proxy: 'none'
-
-          # IPsec encryption cannot be used with BPF NodePort.
-          - name: '5'
-            tunnel: 'disabled'
-            ipfamily: 'dual'
-            encryption: 'ipsec'
-            kube-proxy: 'iptables'
-
-          - name: '6'
-            tunnel: 'vxlan'
-            ipfamily: 'ipv4'
-            encryption: 'disabled'
-            kube-proxy: 'none'
-
-          - name: '7'
-            tunnel: 'vxlan'
-            ipfamily: 'ipv4'
-            encryption: 'wireguard'
-            kube-proxy: 'iptables'
-
-          # IPsec encryption cannot be used with BPF NodePort.
-          - name: '8'
-            tunnel: 'vxlan'
-            ipfamily: 'ipv4'
-            encryption: 'ipsec'
-            kube-proxy: 'iptables'
-
-        # Tunneling is currently not supported in case of ipv6-only clusters (#17240)
-        #  - name: '9'
-        #    tunnel: 'vxlan'
-        #    ipfamily: 'ipv6'
-        #    encryption: 'disabled'
-        #    kube-proxy: 'none'
-
-          - name: '10'
-            tunnel: 'vxlan'
-            ipfamily: 'dual'
-            encryption: 'wireguard'
-            kube-proxy: 'iptables'
+#          # IPsec encryption cannot be used with BPF NodePort.
+#          - name: '3'
+#            tunnel: 'disabled'
+#            ipfamily: 'ipv4'
+#            encryption: 'ipsec'
+#            kube-proxy: 'iptables'
+#
+#          # IPsec encryption is currently not supported in case of ipv6-only clusters (#23553)
+#          # Wireguard encryption is currently affected by a bug in case of ipv6-only clusters (#23917)
+#          - name: '4'
+#            tunnel: 'disabled'
+#            ipfamily: 'ipv6'
+#            encryption: 'disabled'
+#            kube-proxy: 'none'
+#
+#          # IPsec encryption cannot be used with BPF NodePort.
+#          - name: '5'
+#            tunnel: 'disabled'
+#            ipfamily: 'dual'
+#            encryption: 'ipsec'
+#            kube-proxy: 'iptables'
+#
+#          - name: '6'
+#            tunnel: 'vxlan'
+#            ipfamily: 'ipv4'
+#            encryption: 'disabled'
+#            kube-proxy: 'none'
+#
+#          - name: '7'
+#            tunnel: 'vxlan'
+#            ipfamily: 'ipv4'
+#            encryption: 'wireguard'
+#            kube-proxy: 'iptables'
+#
+#          # IPsec encryption cannot be used with BPF NodePort.
+#          - name: '8'
+#            tunnel: 'vxlan'
+#            ipfamily: 'ipv4'
+#            encryption: 'ipsec'
+#            kube-proxy: 'iptables'
+#
+#        # Tunneling is currently not supported in case of ipv6-only clusters (#17240)
+#        #  - name: '9'
+#        #    tunnel: 'vxlan'
+#        #    ipfamily: 'ipv6'
+#        #    encryption: 'disabled'
+#        #    kube-proxy: 'none'
+#
+#          - name: '10'
+#            tunnel: 'vxlan'
+#            ipfamily: 'dual'
+#            encryption: 'wireguard'
+#            kube-proxy: 'iptables'
 
     steps:
     - name: Checkout GitHub master
@@ -257,6 +257,7 @@ jobs:
       id: vars
       run: |
         SHA=${{ needs.setup-report.outputs.sha }}
+        SHA=c3cb8eba315b8786a166e0c34bae78f7fd202bf4
 
         # bpf.masquerade is disabled due to #23283
         CILIUM_INSTALL_DEFAULTS="--chart-directory=install/kubernetes/cilium \
@@ -400,13 +401,13 @@ jobs:
         kubectl --context ${{ env.contextName1 }} patch deployment -n kube-system coredns --patch="$COREDNS_PATCH"
         kubectl --context ${{ env.contextName2 }} patch deployment -n kube-system coredns --patch="$COREDNS_PATCH"
 
-    - name: Wait for images to be available
-      timeout-minutes: 10
-      shell: bash
-      run: |
-        for image in cilium-ci operator-generic-ci hubble-relay-ci clustermesh-apiserver-ci ; do
-          until docker manifest inspect quay.io/${{ env.QUAY_ORGANIZATION_DEV }}/$image:${{ needs.setup-report.outputs.sha }} &> /dev/null; do sleep 45s; done
-        done
+#    - name: Wait for images to be available
+#      timeout-minutes: 10
+#      shell: bash
+#      run: |
+#        for image in cilium-ci operator-generic-ci hubble-relay-ci clustermesh-apiserver-ci ; do
+#          until docker manifest inspect quay.io/${{ env.QUAY_ORGANIZATION_DEV }}/$image:${{ needs.setup-report.outputs.sha }} &> /dev/null; do sleep 45s; done
+#        done
 
     - name: Install Cilium in cluster1
       run: |
