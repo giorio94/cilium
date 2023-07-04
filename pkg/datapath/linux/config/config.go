@@ -73,9 +73,19 @@ var (
 	}
 )
 
+// HeaderNodeDefinesMap is the type containing the key-value pairs representing
+// extra define directives for datapath node configuration.
+type HeaderNodeDefinesMap map[string]string
+
+// HeaderNodeDefinesFn is a function returning the key-value pairs representing
+// extra define directives for datapath node configuration.
+type HeaderNodeDefinesFn func() (HeaderNodeDefinesMap, error)
+
 // HeaderfileWriter is a wrapper type which implements datapath.ConfigWriter.
 // It manages writing of configuration of datapath program headerfiles.
-type HeaderfileWriter struct{}
+type HeaderfileWriter struct {
+	nodeExtraDefines []HeaderNodeDefinesFn
+}
 
 func writeIncludes(w io.Writer) (int, error) {
 	return fmt.Fprintf(w, "#include \"lib/utils.h\"\n\n")
@@ -83,8 +93,8 @@ func writeIncludes(w io.Writer) (int, error) {
 
 // WriteNodeConfig writes the local node configuration to the specified writer.
 func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeConfiguration) error {
-	extraMacrosMap := make(map[string]string)
-	cDefinesMap := make(map[string]string)
+	extraMacrosMap := make(HeaderNodeDefinesMap)
+	cDefinesMap := make(HeaderNodeDefinesMap)
 
 	fw := bufio.NewWriter(w)
 
@@ -719,6 +729,21 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 		return err
 	}
 	cDefinesMap["EPHEMERAL_MIN"] = fmt.Sprintf("%d", ephemeralMin)
+
+	for _, fn := range h.nodeExtraDefines {
+		defines, err := fn()
+		if err != nil {
+			return err
+		}
+
+		for key, value := range defines {
+			if _, ok := cDefinesMap[key]; ok {
+				return fmt.Errorf("extra node define overwrites key %q", key)
+			}
+
+			cDefinesMap[key] = value
+		}
+	}
 
 	// Since golang maps are unordered, we sort the keys in the map
 	// to get a consistent written format to the writer. This maintains

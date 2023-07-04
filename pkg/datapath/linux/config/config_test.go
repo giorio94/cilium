@@ -98,6 +98,41 @@ func (s *ConfigSuite) TestWriteNodeConfig(c *C) {
 	})
 }
 
+func (s *ConfigSuite) TestWriteNodeConfigExtraDefines(c *C) {
+	var buffer bytes.Buffer
+
+	// Assert that configurations are propagated when all generated extra defines are valid
+	cfg := HeaderfileWriter{nodeExtraDefines: []HeaderNodeDefinesFn{
+		func() (HeaderNodeDefinesMap, error) { return HeaderNodeDefinesMap{"FOO": "0x1", "BAR": "0x2"}, nil },
+		func() (HeaderNodeDefinesMap, error) { return HeaderNodeDefinesMap{"BAZ": "0x3"}, nil },
+	}}
+
+	buffer.Reset()
+	c.Assert(cfg.WriteNodeConfig(&buffer, &dummyNodeCfg), IsNil)
+
+	output := buffer.String()
+	c.Assert(output, Matches, "(?s).*#define FOO 0x1\n.*")
+	c.Assert(output, Matches, "(?s).*#define BAR 0x2\n.*")
+	c.Assert(output, Matches, "(?s).*#define BAZ 0x3\n.*")
+
+	// Assert that an error is returned when one extra define function returns an error
+	cfg = HeaderfileWriter{nodeExtraDefines: []HeaderNodeDefinesFn{
+		func() (HeaderNodeDefinesMap, error) { return nil, errors.New("failing on purpose") },
+	}}
+
+	buffer.Reset()
+	c.Assert(cfg.WriteNodeConfig(&buffer, &dummyNodeCfg), NotNil)
+
+	// Assert that an error is returned when one extra define would overwrite an already existing entry
+	cfg = HeaderfileWriter{nodeExtraDefines: []HeaderNodeDefinesFn{
+		func() (HeaderNodeDefinesMap, error) { return HeaderNodeDefinesMap{"FOO": "0x1", "BAR": "0x2"}, nil },
+		func() (HeaderNodeDefinesMap, error) { return HeaderNodeDefinesMap{"FOO": "0x3"}, nil },
+	}}
+
+	buffer.Reset()
+	c.Assert(cfg.WriteNodeConfig(&buffer, &dummyNodeCfg), NotNil)
+}
+
 func (s *ConfigSuite) TestWriteNetdevConfig(c *C) {
 	writeConfig(c, "netdev", func(w io.Writer, dp datapath.ConfigWriter) error {
 		return dp.WriteNetdevConfig(w, &dummyDevCfg)
