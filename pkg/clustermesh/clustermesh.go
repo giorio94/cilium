@@ -5,7 +5,6 @@ package clustermesh
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/pkg/allocator"
@@ -61,6 +60,10 @@ type Configuration struct {
 	// ServiceIPGetter, if not nil, is used to create a custom dialer for service resolution.
 	ServiceIPGetter k8s.ServiceIPGetter
 
+	// ClusterIDsManager handles the reservation of the ClusterIDs associated
+	// with remote clusters, to ensure their uniqueness.
+	ClusterIDsManager cell.Overridable[ClusterIDsManager]
+
 	Metrics         Metrics
 	InternalMetrics internal.Metrics
 }
@@ -88,45 +91,12 @@ type ClusterMesh struct {
 	// internal implements the common logic to connect to remote clusters.
 	internal internal.ClusterMesh
 
-	usedIDs *ClusterMeshUsedIDs
 	// globalServices is a list of all global services. The datastructure
 	// is protected by its own mutex inside the structure.
 	globalServices *globalServiceCache
 
 	// nodeName is the name of the local node. This is used for logging and metrics
 	nodeName string
-}
-
-type ClusterMeshUsedIDs struct {
-	usedClusterIDs      map[uint32]struct{}
-	usedClusterIDsMutex lock.Mutex
-}
-
-func newClusterMeshUsedIDs() *ClusterMeshUsedIDs {
-	return &ClusterMeshUsedIDs{
-		usedClusterIDs: make(map[uint32]struct{}),
-	}
-}
-
-func (cm *ClusterMeshUsedIDs) reserveClusterID(clusterID uint32) error {
-	cm.usedClusterIDsMutex.Lock()
-	defer cm.usedClusterIDsMutex.Unlock()
-
-	if _, ok := cm.usedClusterIDs[clusterID]; ok {
-		// ClusterID already used
-		return fmt.Errorf("clusterID %d is already used", clusterID)
-	}
-
-	cm.usedClusterIDs[clusterID] = struct{}{}
-
-	return nil
-}
-
-func (cm *ClusterMeshUsedIDs) releaseClusterID(clusterID uint32) {
-	cm.usedClusterIDsMutex.Lock()
-	defer cm.usedClusterIDsMutex.Unlock()
-
-	delete(cm.usedClusterIDs, clusterID)
 }
 
 // NewClusterMesh creates a new remote cluster cache based on the
@@ -139,7 +109,6 @@ func NewClusterMesh(lifecycle hive.Lifecycle, c Configuration) *ClusterMesh {
 	nodeName := nodeTypes.GetName()
 	cm := &ClusterMesh{
 		conf:     c,
-		usedIDs:  newClusterMeshUsedIDs(),
 		nodeName: nodeName,
 		globalServices: newGlobalServiceCache(
 			c.Metrics.TotalGlobalServices.WithLabelValues(c.ClusterName, nodeName),
@@ -166,7 +135,7 @@ func (cm *ClusterMesh) newRemoteCluster(name string, status internal.StatusFunc)
 	rc := &remoteCluster{
 		name:    name,
 		mesh:    cm,
-		usedIDs: cm.usedIDs,
+		usedIDs: cm.conf.ClusterIDsManager.Value(),
 		status:  status,
 		swg:     lock.NewStoppableWaitGroup(),
 	}
