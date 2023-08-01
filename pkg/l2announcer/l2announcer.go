@@ -16,6 +16,7 @@ import (
 	"time"
 
 	daemon_k8s "github.com/cilium/cilium/daemon/k8s"
+	dpcfg "github.com/cilium/cilium/pkg/datapath/linux/config"
 	"github.com/cilium/cilium/pkg/datapath/tables"
 	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/hive/cell"
@@ -34,6 +35,7 @@ import (
 	"github.com/cilium/cilium/pkg/statedb"
 
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/pflag"
 	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -47,8 +49,11 @@ import (
 var Cell = cell.Module(
 	"l2-announcer",
 	"L2 Announcer",
+
+	cell.Config(defaultConfig),
 	cell.Provide(NewL2Announcer),
 	cell.Provide(l2AnnouncementPolicyResource),
+	cell.Provide(datapathNodeHeaderConfig),
 )
 
 func l2AnnouncementPolicyResource(lc hive.Lifecycle, cs client.Clientset) (resource.Resource[*cilium_api_v2alpha1.CiliumL2AnnouncementPolicy], error) {
@@ -75,6 +80,50 @@ type l2AnnouncerParams struct {
 	L2AnnounceTable      statedb.Table[*tables.L2AnnounceEntry]
 	StateDB              statedb.DB
 	JobRegistry          job.Registry
+}
+
+type Config struct {
+	// EnableL2Announcements enables L2 announcement of service IPs
+	EnableL2Announcements bool
+
+	// L2AnnouncementsLeaseDuration, if a lease has not been renewed for X amount of time, a new leader can be chosen.
+	L2AnnouncementsLeaseDuration time.Duration
+	// L2AnnouncementsRenewDeadline, the leader will renew the lease every X amount of time.
+	L2AnnouncementsRenewDeadline time.Duration
+	// L2AnnouncementsRetryPeriod, on renew failure, retry after X amount of time.
+	L2AnnouncementsRetryPeriod time.Duration
+}
+
+var defaultConfig = Config{
+	EnableL2Announcements:        false,
+	L2AnnouncementsLeaseDuration: 15 * time.Second,
+	L2AnnouncementsRenewDeadline: 5 * time.Second,
+	L2AnnouncementsRetryPeriod:   2 * time.Second,
+}
+
+func (def Config) Flags(flags *pflag.FlagSet) {
+	flags.Bool(option.EnableL2Announcements, def.EnableL2Announcements, "Enable L2 announcements")
+	flags.Duration(option.L2AnnouncerLeaseDuration, def.L2AnnouncementsLeaseDuration, "Duration of inactivity after which a new leader is selected")
+	flags.Duration(option.L2AnnouncerRenewDeadline, def.L2AnnouncementsRenewDeadline, "Interval at which the leader renews a lease")
+	flags.Duration(option.L2AnnouncerRetryPeriod, def.L2AnnouncementsRetryPeriod, "Timeout after a renew failure, before the next retry")
+}
+
+func (cfg Config) ToDatapathNodeHeaderConfig() dpcfg.HeaderNodeDefinesFnOut {
+	return dpcfg.NewHeaderNodeDefinesFn(func() (dpcfg.HeaderNodeDefinesMap, error) {
+		output := make(dpcfg.HeaderNodeDefinesMap)
+
+		if cfg.EnableL2Announcements {
+			output["ENABLE_L2_ANNOUNCEMENTS"] = "1"
+			// If the agent is down for longer than the lease duration, stop responding
+			output["L2_ANNOUNCEMENTS_MAX_LIVENESS"] = fmt.Sprintf("%dULL", cfg.L2AnnouncementsLeaseDuration.Nanoseconds())
+		}
+
+		return output, nil
+	})
+}
+
+func datapathNodeHeaderConfig(cfg Config) dpcfg.HeaderNodeDefinesFnOut {
+	return cfg.ToDatapathNodeHeaderConfig()
 }
 
 // L2Announcer takes all L2 announcement policies and filters down to those that match the labels of the local node. It

@@ -363,18 +363,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.EnableWireguard, false, "Enable WireGuard")
 	option.BindEnv(vp, option.EnableWireguard)
 
-	flags.Bool(option.EnableL2Announcements, false, "Enable L2 announcements")
-	option.BindEnv(vp, option.EnableL2Announcements)
-
-	flags.Duration(option.L2AnnouncerLeaseDuration, 15*time.Second, "Duration of inactivity after which a new leader is selected")
-	option.BindEnv(vp, option.L2AnnouncerLeaseDuration)
-
-	flags.Duration(option.L2AnnouncerRenewDeadline, 5*time.Second, "Interval at which the leader renews a lease")
-	option.BindEnv(vp, option.L2AnnouncerRenewDeadline)
-
-	flags.Duration(option.L2AnnouncerRetryPeriod, 2*time.Second, "Timeout after a renew failure, before the next retry")
-	option.BindEnv(vp, option.L2AnnouncerRetryPeriod)
-
 	flags.Bool(option.EnableWireguardUserspaceFallback, false, "Enable fallback to the WireGuard userspace implementation")
 	option.BindEnv(vp, option.EnableWireguardUserspaceFallback)
 
