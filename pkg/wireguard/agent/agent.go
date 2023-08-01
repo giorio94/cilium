@@ -14,6 +14,8 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/cilium/cilium/pkg/datapath/link"
+	dpcfg "github.com/cilium/cilium/pkg/datapath/linux/config"
 	"github.com/go-openapi/strfmt"
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
@@ -111,6 +113,27 @@ func NewAgent(privKeyPath string, localNodeStore *node.LocalNodeStore) (*Agent, 
 
 		nodeToNodeEncryption: option.Config.EncryptNode && !optOut,
 	}, nil
+}
+
+func (a *Agent) ToDatapathNodeHeaderConfig() dpcfg.HeaderNodeDefinesFnOut {
+	return dpcfg.NewHeaderNodeDefinesFn(func() (dpcfg.HeaderNodeDefinesMap, error) {
+		output := make(dpcfg.HeaderNodeDefinesMap)
+
+		if a != nil {
+			output["ENABLE_WIREGUARD"] = "1"
+			ifindex, err := link.GetIfIndex(types.IfaceName)
+			if err != nil {
+				return nil, fmt.Errorf("failed to retrieve index of wireguard interface %q: %w", types.IfaceName, err)
+			}
+			output["WG_IFINDEX"] = fmt.Sprintf("%d", ifindex)
+
+			if option.Config.EncryptNode {
+				output["ENABLE_NODE_ENCRYPTION"] = "1"
+			}
+		}
+
+		return output, nil
+	})
 }
 
 // Close is called when the agent stops

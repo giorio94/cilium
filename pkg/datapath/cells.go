@@ -52,6 +52,8 @@ var Cell = cell.Module(
 	cell.Provide(
 		newWireguardAgent,
 		newDatapath,
+
+		func(a *wg.Agent) dpcfg.HeaderNodeDefinesFnOut { return a.ToDatapathNodeHeaderConfig() },
 	),
 
 	// This cell periodically updates the agent liveness value in configmap.Map to inform

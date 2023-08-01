@@ -61,7 +61,6 @@ import (
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/sysctl"
-	wgtypes "github.com/cilium/cilium/pkg/wireguard/types"
 )
 
 var (
@@ -285,19 +284,6 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 
 	if option.Config.EnableIPSec {
 		cDefinesMap["ENABLE_IPSEC"] = "1"
-	}
-
-	if option.Config.EnableWireguard {
-		cDefinesMap["ENABLE_WIREGUARD"] = "1"
-		ifindex, err := link.GetIfIndex(wgtypes.IfaceName)
-		if err != nil {
-			return err
-		}
-		cDefinesMap["WG_IFINDEX"] = fmt.Sprintf("%d", ifindex)
-
-		if option.Config.EncryptNode {
-			cDefinesMap["ENABLE_NODE_ENCRYPTION"] = "1"
-		}
 	}
 
 	if option.Config.EnableEncryptionStrictMode {
