@@ -466,3 +466,42 @@ var shutdownOnStartCell = cell.Invoke(func(lc hive.Lifecycle, shutdowner hive.Sh
 			return nil
 		}})
 })
+
+func TestOverridable(t *testing.T) {
+	tests := []struct {
+		name      string
+		providers []any
+		expected  string
+	}{
+		{
+			name:      "default value",
+			providers: []any{cell.Defaulter(func() string { return "foo" })},
+			expected:  "foo",
+		},
+		{
+			name: "overridden value",
+			providers: []any{
+				cell.Defaulter(func() string { return "foo" }),
+				func() string { return "bar" },
+			},
+			expected: "bar",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var value string
+
+			testCell := cell.Group(
+				cell.Provide(tt.providers...),
+				cell.Invoke(func(o cell.Overridable[string]) { value = o.Value() }),
+			)
+
+			hive := hive.New(testCell)
+			assert.NoError(t, hive.Start(context.TODO()), "Start should have succeeded")
+			assert.NoError(t, hive.Stop(context.TODO()), "Stop should have succeeded")
+
+			assert.Equal(t, tt.expected, value, "Overridable value not set correctly")
+		})
+	}
+}
