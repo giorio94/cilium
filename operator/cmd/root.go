@@ -35,6 +35,7 @@ import (
 	"github.com/cilium/cilium/operator/pkg/ingress"
 	"github.com/cilium/cilium/operator/pkg/lbipam"
 	operatorWatchers "github.com/cilium/cilium/operator/watchers"
+	"github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/components"
 	"github.com/cilium/cilium/pkg/controller"
 	"github.com/cilium/cilium/pkg/defaults"
@@ -99,6 +100,8 @@ var (
 	ControlPlane = cell.Module(
 		"operator-controlplane",
 		"Operator Control Plane",
+
+		cell.Config(types.ClusterIDName{}),
 
 		cell.Invoke(
 			registerOperatorHooks,
@@ -510,13 +513,17 @@ func (legacy *legacyOnLeader) onStart(_ hive.HookContext) error {
 		})
 
 		if legacy.clientset.IsEnabled() && operatorOption.Config.SyncK8sServices {
+			clusterIDName := types.ClusterIDName{
+				ClusterID:   option.Config.ClusterID,
+				ClusterName: option.Config.ClusterName,
+			}
 			operatorWatchers.StartSynchronizingServices(legacy.ctx, &legacy.wg, operatorWatchers.ServiceSyncParameters{
-				ServiceSyncConfiguration: option.Config,
-				Clientset:                legacy.clientset,
-				Services:                 legacy.resources.Services,
-				Endpoints:                legacy.resources.Endpoints,
-				SharedOnly:               true,
-				StoreFactory:             legacy.storeFactory,
+				ClusterIDName: clusterIDName,
+				Clientset:     legacy.clientset,
+				Services:      legacy.resources.Services,
+				Endpoints:     legacy.resources.Endpoints,
+				SharedOnly:    true,
+				StoreFactory:  legacy.storeFactory,
 			})
 			// If K8s is enabled we can do the service translation automagically by
 			// looking at services from k8s and retrieve the service IP from that.

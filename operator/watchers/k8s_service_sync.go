@@ -9,11 +9,11 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/k8s"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client"
 	"github.com/cilium/cilium/pkg/k8s/resource"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
-	"github.com/cilium/cilium/pkg/k8s/utils"
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/loadbalancer"
@@ -82,19 +82,8 @@ func k8sServiceHandler(ctx context.Context, clusterName string, shared bool, clu
 	}
 }
 
-// ServiceSyncConfiguration is the required configuration for StartSynchronizingServices
-type ServiceSyncConfiguration interface {
-	// LocalClusterName must return the local cluster name
-	LocalClusterName() string
-
-	// LocalClusterID must return the local cluster id
-	LocalClusterID() uint32
-
-	utils.ServiceConfiguration
-}
-
 type ServiceSyncParameters struct {
-	ServiceSyncConfiguration
+	cmtypes.ClusterIDName
 
 	Clientset    k8sClient.Clientset
 	Services     resource.Resource[*slim_corev1.Service]
@@ -120,7 +109,7 @@ func StartSynchronizingServices(ctx context.Context, wg *sync.WaitGroup, cfg Ser
 			cfg.Backend = kvstore.Client()
 		}
 
-		store := cfg.StoreFactory.NewSyncStore(cfg.LocalClusterName(),
+		store := cfg.StoreFactory.NewSyncStore(cfg.ClusterName,
 			cfg.Backend, serviceStore.ServiceStorePrefix)
 		kvs = store
 		close(kvstoreReady)
@@ -136,7 +125,7 @@ func StartSynchronizingServices(ctx context.Context, wg *sync.WaitGroup, cfg Ser
 		<-kvstoreReady
 
 		log.Info("Starting to synchronize Kubernetes services to kvstore")
-		k8sServiceHandler(ctx, cfg.LocalClusterName(), cfg.SharedOnly, cfg.LocalClusterID())
+		k8sServiceHandler(ctx, cfg.ClusterName, cfg.SharedOnly, cfg.ClusterID)
 	}()
 
 	// Start populating the service cache with Kubernetes services and endpoints

@@ -15,6 +15,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/cilium/cilium/operator/watchers"
+	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/hive/cell"
 	"github.com/cilium/cilium/pkg/kvstore"
@@ -80,6 +81,10 @@ func TestUsersManagement(t *testing.T) {
 				ClusterUsersEnabled:    true,
 				ClusterUsersConfigPath: cfgPath,
 			}
+		}),
+
+		cell.Provide(func() cmtypes.ClusterIDName {
+			return cmtypes.ClusterIDName{ClusterID: 10, ClusterName: "fred"}
 		}),
 
 		cell.Provide(func(lc hive.Lifecycle) promise.Promise[kvstore.BackendOperationsUserMgmt] {
