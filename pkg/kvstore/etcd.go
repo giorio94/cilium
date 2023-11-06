@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/time/rate"
+	"google.golang.org/grpc/connectivity"
 	"sigs.k8s.io/yaml"
 
 	"github.com/cilium/cilium/pkg/backoff"
@@ -647,8 +648,16 @@ func connectEtcdClient(ctx context.Context, config *client.Config, cfgPath strin
 		close(ec.firstSession)
 
 		go ec.statusChecker()
+		go ec.connectionWatcher(ec.client.Ctx())
 
 		watcher := ec.ListAndWatch(ctx, HeartbeatPath, 128)
+		go func() {
+			for {
+				time.Sleep(10 * time.Second)
+				err := ec.client.RequestProgress(ctx)
+				ec.logger.WithError(err).Warning("Requested progress")
+			}
+		}()
 
 		for {
 			select {
@@ -676,6 +685,28 @@ func connectEtcdClient(ctx context.Context, config *client.Config, cfgPath strin
 	}()
 
 	return ec, nil
+}
+
+func (e *etcdClient) connectionWatcher(ctx context.Context) {
+	prev := connectivity.Idle
+	for {
+		current := e.client.ActiveConnection().GetState()
+		e.logger.WithFields(logrus.Fields{
+			"prev":    prev,
+			"current": current,
+		}).Warning("Connection status transitioned")
+		prev = current
+
+		if current == connectivity.Ready {
+			err := e.client.RequestProgress(ctx)
+			e.logger.WithError(err).Warning("Requested progress")
+		}
+
+		valid := e.client.ActiveConnection().WaitForStateChange(ctx, current)
+		if !valid {
+			return
+		}
+	}
 }
 
 // makeSessionName builds up a session/locksession controller name
@@ -868,7 +899,7 @@ reList:
 		}
 
 		etcdWatch := e.client.Watch(client.WithRequireLeader(ctx), w.Prefix,
-			client.WithPrefix(), client.WithRev(nextRev))
+			client.WithPrefix(), client.WithRev(nextRev), client.WithProgressNotify())
 		lr.Done()
 
 		for {
@@ -883,6 +914,10 @@ reList:
 				if !ok {
 					time.Sleep(50 * time.Millisecond)
 					goto recreateWatcher
+				}
+
+				if r.IsProgressNotify() {
+					scopedLog.Warning("Received progress notify")
 				}
 
 				scopedLog := scopedLog.WithField(fieldRev, r.Header.Revision)
@@ -974,12 +1009,9 @@ func (e *etcdClient) paginatedList(ctx context.Context, log *logrus.Entry, prefi
 }
 
 func (e *etcdClient) determineEndpointStatus(ctx context.Context, endpointAddress string) (string, error) {
-	ctxTimeout, cancel := context.WithTimeout(ctx, statusCheckTimeout)
-	defer cancel()
-
 	e.logger.Debugf("Checking status to etcd endpoint %s", endpointAddress)
 
-	status, err := e.client.Status(ctxTimeout, endpointAddress)
+	status, err := e.client.Status(ctx, endpointAddress)
 	if err != nil {
 		return fmt.Sprintf("%s - %s", endpointAddress, err), Hint(err)
 	}

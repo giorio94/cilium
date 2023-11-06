@@ -211,12 +211,7 @@ type BackendOperations interface {
 	// Decodes a key previously encoded back into the original binary slice
 	Decode(in string) ([]byte, error)
 
-	// ListAndWatch creates a new watcher which will watch the specified
-	// prefix for changes. Before doing this, it will list the current keys
-	// matching the prefix and report them as new keys. The Events channel is
-	// created with the specified sizes. Upon every change observed, a
-	// KeyValueEvent will be sent to the Events channel
-	ListAndWatch(ctx context.Context, prefix string, chanSize int) *Watcher
+	ListAndWatcher
 
 	// RegisterLeaseExpiredObserver registers a function which is executed when
 	// the lease associated with a key having the given prefix is detected as expired.
@@ -233,4 +228,13 @@ type BackendOperationsUserMgmt interface {
 
 	// UserEnforcePresence deletes a user from the kvstore, if present.
 	UserEnforceAbsence(ctx context.Context, name string) error
+}
+
+type ListAndWatcher interface {
+	// ListAndWatch creates a new watcher which will watch the specified
+	// prefix for changes. Before doing this, it will list the current keys
+	// matching the prefix and report them as new keys. The Events channel is
+	// created with the specified sizes. Upon every change observed, a
+	// KeyValueEvent will be sent to the Events channel
+	ListAndWatch(ctx context.Context, prefix string, chanSize int) *Watcher
 }
