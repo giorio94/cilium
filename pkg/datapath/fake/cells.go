@@ -6,6 +6,7 @@ package fake
 import (
 	"github.com/cilium/cilium/pkg/datapath/linux/bigtcp"
 	"github.com/cilium/cilium/pkg/datapath/tables"
+	"github.com/cilium/cilium/pkg/datapath/tunnel"
 	"github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/hive/cell"
 	"github.com/cilium/cilium/pkg/maps/authmap"
@@ -39,4 +40,6 @@ var Cell = cell.Module(
 	// This cell defines StateDB tables and their schemas for tables which are used to transfer information
 	// between datapath components and more high-level components.
 	tables.Cell,
+
+	tunnel.Cell,
 )

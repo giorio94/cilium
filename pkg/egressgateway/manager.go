@@ -20,6 +20,7 @@ import (
 
 	"github.com/cilium/cilium/pkg/datapath/linux/config/defines"
 	"github.com/cilium/cilium/pkg/datapath/linux/probes"
+	"github.com/cilium/cilium/pkg/datapath/tunnel"
 	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/hive/cell"
 	"github.com/cilium/cilium/pkg/identity"
@@ -170,6 +171,7 @@ func NewEgressGatewayManager(p Params) (out struct {
 
 	*Manager
 	defines.NodeOut
+	tunnel.EnablerOut
 }, err error) {
 	dcfg := p.DaemonConfig
 
@@ -218,6 +220,8 @@ func NewEgressGatewayManager(p Params) (out struct {
 	out.NodeDefines = map[string]string{
 		"ENABLE_EGRESS_GATEWAY": "1",
 	}
+
+	out.EnablerOut = tunnel.NewEnabler(true)
 
 	return out, nil
 }
