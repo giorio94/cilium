@@ -30,10 +30,11 @@ func (s *TunnelMapTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *TunnelMapTestSuite) TestClusterAwareAddressing(c *C) {
-	m := NewTunnelMap("test_cilium_tunnel_map")
-	defer m.Unpin()
+	m := newMap("test_cilium_tunnel_map")
+	c.Assert(m.enable(), IsNil)
+	defer m.bpfMap.Unpin()
 
-	err := m.OpenOrCreate()
+	err := m.init()
 	c.Assert(err, IsNil)
 
 	prefix0 := cmtypes.MustParseAddrCluster("10.0.0.1")

@@ -26,6 +26,7 @@ import (
 	"github.com/cilium/cilium/pkg/maps"
 	"github.com/cilium/cilium/pkg/maps/eventsmap"
 	"github.com/cilium/cilium/pkg/maps/nodemap"
+	tunnelmap "github.com/cilium/cilium/pkg/maps/tunnel"
 	monitorAgent "github.com/cilium/cilium/pkg/monitor/agent"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
@@ -149,6 +150,7 @@ func newDatapath(params datapathParams) types.Datapath {
 		IptManager: iptablesManager,
 		WGAgent:    params.WgAgent,
 		NodeMap:    params.NodeMap,
+		TunnelMap:  params.TunnelMap,
 		Writer:     params.ConfigWriter,
 	})
 
@@ -172,7 +174,8 @@ type datapathParams struct {
 	// Some of the entries in this slice may be nil.
 	BpfMaps []bpf.BpfMap `group:"bpf-maps"`
 
-	NodeMap nodemap.Map
+	NodeMap   nodemap.Map
+	TunnelMap tunnelmap.Map
 
 	// Depend on DeviceManager to ensure devices have been resolved.
 	// This is required until option.Config.GetDevices() has been removed and

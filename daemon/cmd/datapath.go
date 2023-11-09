@@ -38,7 +38,6 @@ import (
 	"github.com/cilium/cilium/pkg/maps/neighborsmap"
 	"github.com/cilium/cilium/pkg/maps/policymap"
 	"github.com/cilium/cilium/pkg/maps/srv6map"
-	"github.com/cilium/cilium/pkg/maps/tunnel"
 	"github.com/cilium/cilium/pkg/maps/vtep"
 	"github.com/cilium/cilium/pkg/maps/worldcidrsmap"
 	"github.com/cilium/cilium/pkg/metrics"
@@ -334,12 +333,6 @@ func (d *Daemon) initMaps() error {
 
 	if err := metricsmap.Metrics.OpenOrCreate(); err != nil {
 		return fmt.Errorf("initializing metrics map: %w", err)
-	}
-
-	if option.Config.TunnelingEnabled() {
-		if err := tunnel.TunnelMap().Recreate(); err != nil {
-			return fmt.Errorf("initializing tunnel map: %w", err)
-		}
 	}
 
 	if option.Config.EnableSRv6 {

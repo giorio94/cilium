@@ -26,7 +26,7 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/linux/route"
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	nodemapfake "github.com/cilium/cilium/pkg/maps/nodemap/fake"
-	"github.com/cilium/cilium/pkg/maps/tunnel"
+	tunnelmapfake "github.com/cilium/cilium/pkg/maps/tunnel/fake"
 	"github.com/cilium/cilium/pkg/mtu"
 	"github.com/cilium/cilium/pkg/netns"
 	nodeaddressing "github.com/cilium/cilium/pkg/node/addressing"
@@ -115,10 +115,6 @@ func (s *linuxPrivilegedBaseTestSuite) SetUpTest(c *check.C, addressing datapath
 	}
 	err = setupDummyDevice(dummyHostDeviceName, ips...)
 	c.Assert(err, check.IsNil)
-
-	tunnel.SetTunnelMap(tunnel.NewTunnelMap("test_cilium_tunnel_map"))
-	err = tunnel.TunnelMap().OpenOrCreate()
-	c.Assert(err, check.IsNil)
 }
 
 func (s *linuxPrivilegedIPv6OnlyTestSuite) SetUpTest(c *check.C) {
@@ -139,8 +135,6 @@ func (s *linuxPrivilegedIPv4AndIPv6TestSuite) SetUpTest(c *check.C) {
 func tearDownTest(c *check.C) {
 	removeDevice(dummyHostDeviceName)
 	removeDevice(dummyExternalDeviceName)
-	err := tunnel.TunnelMap().Unpin()
-	c.Assert(err, check.IsNil)
 }
 
 func (s *linuxPrivilegedIPv6OnlyTestSuite) TearDownTest(c *check.C) {
@@ -204,7 +198,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestUpdateNodeRoute(c *check.C) {
 
 	dpConfig := DatapathConfiguration{HostDevice: dummyHostDeviceName}
 
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 	nodeConfig := datapath.LocalNodeConfiguration{
 		EnableIPv4: s.enableIPv4,
@@ -252,7 +246,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestUpdateNodeRoute(c *check.C) {
 func (s *linuxPrivilegedBaseTestSuite) TestSingleClusterPrefix(c *check.C) {
 	dpConfig := DatapathConfiguration{HostDevice: dummyHostDeviceName}
 
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nil)
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nil, tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 
 	// enable as per test definition
@@ -318,7 +312,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestAuxiliaryPrefixes(c *check.C) {
 	net2 := cidr.MustParseCIDR("cafe:f00d::/112")
 
 	dpConfig := DatapathConfiguration{HostDevice: dummyHostDeviceName}
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nil)
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nil, tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 	nodeConfig := datapath.LocalNodeConfiguration{
 		EnableIPv4:        s.enableIPv4,
@@ -392,7 +386,8 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateEncapsulation(c *check.C) {
 	externalNodeIP2 := net.ParseIP("8.8.8.8")
 
 	dpConfig := DatapathConfiguration{HostDevice: dummyHostDeviceName}
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	tunnelMap := tunnelmapfake.New()
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelMap)
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 	nodeConfig := datapath.LocalNodeConfiguration{
 		EnableIPv4:          s.enableIPv4,
@@ -423,7 +418,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateEncapsulation(c *check.C) {
 	c.Assert(err, check.IsNil)
 
 	if s.enableIPv4 {
-		underlayIP, err := tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
+		underlayIP, err := tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
 		c.Assert(err, check.IsNil)
 		c.Assert(underlayIP.Equal(externalNodeIP1), check.Equals, true)
 
@@ -433,7 +428,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateEncapsulation(c *check.C) {
 	}
 
 	if s.enableIPv6 {
-		underlayIP, err := tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
+		underlayIP, err := tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
 		c.Assert(err, check.IsNil)
 		c.Assert(underlayIP.Equal(externalNodeIP1), check.Equals, true)
 
@@ -463,7 +458,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateEncapsulation(c *check.C) {
 
 	// alloc range v1 should map to underlay2
 	if s.enableIPv4 {
-		underlayIP, err := tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
+		underlayIP, err := tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
 		c.Assert(err, check.IsNil)
 		c.Assert(underlayIP.Equal(externalNodeIP2), check.Equals, true)
 
@@ -473,7 +468,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateEncapsulation(c *check.C) {
 	}
 
 	if s.enableIPv6 {
-		underlayIP, err := tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
+		underlayIP, err := tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
 		c.Assert(err, check.IsNil)
 		c.Assert(underlayIP.Equal(externalNodeIP2), check.Equals, true)
 
@@ -502,15 +497,15 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateEncapsulation(c *check.C) {
 	c.Assert(err, check.IsNil)
 
 	// alloc range v1 should fail
-	_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
+	_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
 	c.Assert(err, check.Not(check.IsNil))
 
-	_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
+	_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
 	c.Assert(err, check.Not(check.IsNil))
 
 	if s.enableIPv4 {
 		// alloc range v2 should map to underlay1
-		underlayIP, err := tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc2.IP))
+		underlayIP, err := tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc2.IP))
 		c.Assert(err, check.IsNil)
 		c.Assert(underlayIP.Equal(externalNodeIP1), check.Equals, true)
 
@@ -527,7 +522,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateEncapsulation(c *check.C) {
 
 	if s.enableIPv6 {
 		// alloc range v2 should map to underlay1
-		underlayIP, err := tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc2.IP))
+		underlayIP, err := tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc2.IP))
 		c.Assert(err, check.IsNil)
 		c.Assert(underlayIP.Equal(externalNodeIP1), check.Equals, true)
 
@@ -554,10 +549,10 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateEncapsulation(c *check.C) {
 	c.Assert(err, check.IsNil)
 
 	// alloc range v2 should fail
-	_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc2.IP))
+	_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc2.IP))
 	c.Assert(err, check.Not(check.IsNil))
 
-	_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc2.IP))
+	_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc2.IP))
 	c.Assert(err, check.Not(check.IsNil))
 
 	if s.enableIPv4 {
@@ -595,7 +590,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateEncapsulation(c *check.C) {
 
 	if s.enableIPv4 {
 		// alloc range v2 should map to underlay1
-		underlayIP, err := tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc2.IP))
+		underlayIP, err := tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc2.IP))
 		c.Assert(err, check.IsNil)
 		c.Assert(underlayIP.Equal(externalNodeIP1), check.Equals, true)
 
@@ -607,7 +602,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateEncapsulation(c *check.C) {
 
 	if s.enableIPv6 {
 		// alloc range v2 should map to underlay1
-		underlayIP, err := tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc2.IP))
+		underlayIP, err := tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc2.IP))
 		c.Assert(err, check.IsNil)
 		c.Assert(underlayIP.Equal(externalNodeIP1), check.Equals, true)
 
@@ -622,17 +617,17 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateEncapsulation(c *check.C) {
 	c.Assert(err, check.IsNil)
 
 	// alloc range v1 should fail
-	_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
+	_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
 	c.Assert(err, check.Not(check.IsNil))
 
-	_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
+	_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
 	c.Assert(err, check.Not(check.IsNil))
 
 	// alloc range v2 should fail
-	_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc2.IP))
+	_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc2.IP))
 	c.Assert(err, check.Not(check.IsNil))
 
-	_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc2.IP))
+	_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc2.IP))
 	c.Assert(err, check.Not(check.IsNil))
 
 	if s.enableIPv4 {
@@ -660,7 +655,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateIDs(c *check.C) {
 	nodeMap := nodemapfake.NewFakeNodeMap()
 
 	dpConfig := DatapathConfiguration{HostDevice: dummyHostDeviceName}
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodeMap)
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodeMap, tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 
 	err := linuxNodeHandler.NodeConfigurationChanged(datapath.LocalNodeConfiguration{
@@ -806,7 +801,7 @@ func (s *linuxPrivilegedBaseTestSuite) testNodeChurnXFRMLeaksWithConfig(c *check
 	c.Assert(err, check.IsNil)
 
 	dpConfig := DatapathConfiguration{HostDevice: dummyHostDeviceName}
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 
 	err = linuxNodeHandler.NodeConfigurationChanged(config)
@@ -893,7 +888,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeUpdateDirectRouting(c *check.C) {
 	defer removeDevice(externalNode2Device)
 
 	dpConfig := DatapathConfiguration{HostDevice: dummyHostDeviceName}
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 	nodeConfig := datapath.LocalNodeConfiguration{
 		EnableIPv4:              s.enableIPv4,
@@ -1108,7 +1103,8 @@ func (s *linuxPrivilegedBaseTestSuite) TestAgentRestartOptionChanges(c *check.C)
 	underlayIP := net.ParseIP("4.4.4.4")
 
 	dpConfig := DatapathConfiguration{HostDevice: dummyHostDeviceName}
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	tunnelMap := tunnelmapfake.New()
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelMap)
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 	nodeConfig := datapath.LocalNodeConfiguration{
 		EnableIPv4:          s.enableIPv4,
@@ -1139,11 +1135,11 @@ func (s *linuxPrivilegedBaseTestSuite) TestAgentRestartOptionChanges(c *check.C)
 
 	// tunnel map entries must exist
 	if s.enableIPv4 {
-		_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
+		_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
 		c.Assert(err, check.IsNil)
 	}
 	if s.enableIPv6 {
-		_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
+		_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
 		c.Assert(err, check.IsNil)
 	}
 
@@ -1160,9 +1156,9 @@ func (s *linuxPrivilegedBaseTestSuite) TestAgentRestartOptionChanges(c *check.C)
 	c.Assert(err, check.IsNil)
 
 	// tunnel map entries should have been removed
-	_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
+	_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
 	c.Assert(err, check.Not(check.IsNil))
-	_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
+	_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
 	c.Assert(err, check.Not(check.IsNil))
 
 	// Simulate agent restart with address families enabled again
@@ -1179,11 +1175,11 @@ func (s *linuxPrivilegedBaseTestSuite) TestAgentRestartOptionChanges(c *check.C)
 
 	// tunnel map entries must exist
 	if s.enableIPv4 {
-		_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
+		_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip4Alloc1.IP))
 		c.Assert(err, check.IsNil)
 	}
 	if s.enableIPv6 {
-		_, err = tunnel.TunnelMap().GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
+		_, err = tunnelMap.GetTunnelEndpoint(cmtypes.MustAddrClusterFromIP(ip6Alloc1.IP))
 		c.Assert(err, check.IsNil)
 	}
 
@@ -1215,7 +1211,7 @@ func (s *linuxPrivilegedBaseTestSuite) TestNodeValidationDirectRouting(c *check.
 	ip4Alloc1 := cidr.MustParseCIDR("5.5.5.0/24")
 	ip6Alloc1 := cidr.MustParseCIDR("2001:aaaa::/96")
 	dpConfig := DatapathConfiguration{HostDevice: dummyHostDeviceName}
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 
 	if s.enableIPv4 {
@@ -1386,7 +1382,7 @@ func (s *linuxPrivilegedIPv6OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	defer func() { option.Config.ARPPingRefreshPeriod = prevARPPeriod }()
 	option.Config.ARPPingRefreshPeriod = time.Duration(1 * time.Nanosecond)
 
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 
 	err = linuxNodeHandler.NodeConfigurationChanged(datapath.LocalNodeConfiguration{
@@ -2281,7 +2277,7 @@ func (s *linuxPrivilegedIPv6OnlyTestSuite) TestArpPingHandlingForMultiDevice(c *
 	defer func() { option.Config.ARPPingRefreshPeriod = prevARPPeriod }()
 	option.Config.ARPPingRefreshPeriod = 1 * time.Nanosecond
 
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 
 	err = linuxNodeHandler.NodeConfigurationChanged(datapath.LocalNodeConfiguration{
@@ -2568,7 +2564,7 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	defer func() { option.Config.ARPPingRefreshPeriod = prevARPPeriod }()
 	option.Config.ARPPingRefreshPeriod = time.Duration(1 * time.Nanosecond)
 
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 
 	err = linuxNodeHandler.NodeConfigurationChanged(datapath.LocalNodeConfiguration{
@@ -3464,7 +3460,7 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandlingForMultiDevice(c *
 	defer func() { option.Config.ARPPingRefreshPeriod = prevARPPeriod }()
 	option.Config.ARPPingRefreshPeriod = 1 * time.Nanosecond
 
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 
 	err = linuxNodeHandler.NodeConfigurationChanged(datapath.LocalNodeConfiguration{
@@ -3663,7 +3659,7 @@ func (s *linuxPrivilegedBaseTestSuite) benchmarkNodeUpdate(c *check.C, config da
 	ip6Alloc2 := cidr.MustParseCIDR("2001:bbbb::/96")
 
 	dpConfig := DatapathConfiguration{HostDevice: dummyHostDeviceName}
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 
 	err := linuxNodeHandler.NodeConfigurationChanged(config)
@@ -3769,7 +3765,7 @@ func (s *linuxPrivilegedBaseTestSuite) benchmarkNodeUpdateNOP(c *check.C, config
 	ip6Alloc1 := cidr.MustParseCIDR("2001:aaaa::/96")
 
 	dpConfig := DatapathConfiguration{HostDevice: dummyHostDeviceName}
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 
 	err := linuxNodeHandler.NodeConfigurationChanged(config)
@@ -3838,7 +3834,7 @@ func (s *linuxPrivilegedBaseTestSuite) benchmarkNodeValidateImplementation(c *ch
 	ip6Alloc1 := cidr.MustParseCIDR("2001:aaaa::/96")
 
 	dpConfig := DatapathConfiguration{HostDevice: dummyHostDeviceName}
-	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap())
+	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nodemapfake.NewFakeNodeMap(), tunnelmapfake.New())
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
 
 	err := linuxNodeHandler.NodeConfigurationChanged(config)

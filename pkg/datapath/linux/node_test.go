@@ -21,6 +21,7 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/linux/linux_defaults"
 	"github.com/cilium/cilium/pkg/datapath/linux/route"
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
+	tunnelmapfake "github.com/cilium/cilium/pkg/maps/tunnel/fake"
 	"github.com/cilium/cilium/pkg/mtu"
 	"github.com/cilium/cilium/pkg/netns"
 	"github.com/cilium/cilium/pkg/testutils"
@@ -77,7 +78,7 @@ func (s *linuxTestSuite) TestCreateNodeRoute(c *check.C) {
 
 	fakeNodeAddressing := fake.NewNodeAddressing()
 
-	nodeHandler := NewNodeHandler(dpConfig, fakeNodeAddressing, nil)
+	nodeHandler := NewNodeHandler(dpConfig, fakeNodeAddressing, nil, tunnelmapfake.New())
 
 	c1 := cidr.MustParseCIDR("10.10.0.0/16")
 	generatedRoute, err := nodeHandler.createNodeRouteSpec(c1, false)

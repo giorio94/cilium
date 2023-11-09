@@ -25,9 +25,9 @@ var bpfTunnelListCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		common.RequireRootPrivilege("cilium bpf tunnel list")
 
-		tunnelList := make(map[string][]string)
-		if err := tunnel.TunnelMap().Dump(tunnelList); err != nil {
-			os.Exit(1)
+		tunnelList, err := tunnel.DumpMap()
+		if err != nil {
+			Fatalf("cannot dump tunnel map: %s\n", err)
 		}
 
 		if command.OutputOption() {

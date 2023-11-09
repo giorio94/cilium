@@ -8,6 +8,7 @@ import (
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/maps/lbmap"
 	"github.com/cilium/cilium/pkg/maps/nodemap"
+	tunnelmap "github.com/cilium/cilium/pkg/maps/tunnel"
 )
 
 // DatapathConfiguration is the static configuration of the datapath. The
@@ -35,6 +36,7 @@ type DatapathParams struct {
 	WGAgent    datapath.WireguardAgent
 	IptManager datapath.IptablesManager
 	NodeMap    nodemap.Map
+	TunnelMap  tunnelmap.Map
 	Writer     datapath.ConfigWriter
 }
 
@@ -50,7 +52,7 @@ func NewDatapath(params DatapathParams) datapath.Datapath {
 		lbmap:           lbmap.New(),
 	}
 
-	dp.node = NewNodeHandler(params.Config, dp.nodeAddressing, params.NodeMap)
+	dp.node = NewNodeHandler(params.Config, dp.nodeAddressing, params.NodeMap, params.TunnelMap)
 	return dp
 }
 
