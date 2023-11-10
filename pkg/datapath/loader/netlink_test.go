@@ -344,7 +344,7 @@ func TestSetupTunnelDevice(t *testing.T) {
 			require.Error(t, err)
 
 			// Disable tunneling.
-			err = setupTunnelDevice(tunnel.Disabled, 0, mtu)
+			err = setupTunnelDevice("", 0, mtu)
 			require.NoError(t, err)
 			_, err = netlink.LinkByName(defaults.VxlanDevice)
 			require.Error(t, err)

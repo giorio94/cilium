@@ -4,7 +4,6 @@
 package tunnel
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,6 +25,7 @@ func TestConfig(t *testing.T) {
 		enablers []any
 
 		shallFail      bool
+		enabled        bool
 		proto          Protocol
 		port           uint16
 		deviceName     string
@@ -37,20 +37,31 @@ func TestConfig(t *testing.T) {
 			shallFail: true,
 		},
 		{
-			name:  "tunnel not enabled",
-			ucfg:  userCfg{TunnelProtocol: string(Geneve)},
-			proto: Disabled,
+			name:    "tunnel not enabled",
+			ucfg:    userCfg{TunnelProtocol: string(Geneve)},
+			enabled: false,
 		},
 		{
 			name:     "tunnel not enabled, with enablers",
 			ucfg:     userCfg{TunnelProtocol: string(Geneve)},
 			enablers: []any{enabler(false), enabler(false)},
-			proto:    Disabled,
+			enabled:  false,
+		},
+		{
+			name:           "tunnel enabled, auto",
+			ucfg:           userCfg{},
+			enablers:       []any{enabler(true), enabler(false)},
+			enabled:        true,
+			proto:          VXLAN,
+			port:           defaults.TunnelPortVXLAN,
+			deviceName:     defaults.VxlanDevice,
+			shouldAdaptMTU: true,
 		},
 		{
 			name:           "tunnel enabled, vxlan",
 			ucfg:           userCfg{TunnelProtocol: string(VXLAN)},
 			enablers:       []any{enabler(true), enabler(false)},
+			enabled:        true,
 			proto:          VXLAN,
 			port:           defaults.TunnelPortVXLAN,
 			deviceName:     defaults.VxlanDevice,
@@ -60,6 +71,7 @@ func TestConfig(t *testing.T) {
 			name:           "tunnel enabled, vxlan, custom port",
 			ucfg:           userCfg{TunnelProtocol: string(VXLAN), TunnelPort: 1234},
 			enablers:       []any{enabler(false), enabler(true)},
+			enabled:        true,
 			proto:          VXLAN,
 			port:           1234,
 			deviceName:     defaults.VxlanDevice,
@@ -69,6 +81,7 @@ func TestConfig(t *testing.T) {
 			name:           "tunnel enabled, geneve",
 			ucfg:           userCfg{TunnelProtocol: string(Geneve)},
 			enablers:       []any{enabler(true), enabler(true)},
+			enabled:        true,
 			proto:          Geneve,
 			port:           defaults.TunnelPortGeneve,
 			deviceName:     defaults.GeneveDevice,
@@ -78,26 +91,42 @@ func TestConfig(t *testing.T) {
 			name:           "tunnel enabled, geneve, custom port",
 			ucfg:           userCfg{TunnelProtocol: string(Geneve), TunnelPort: 1234},
 			enablers:       []any{enabler(true), enabler(false)},
+			enabled:        true,
 			proto:          Geneve,
 			port:           1234,
 			deviceName:     defaults.GeneveDevice,
 			shouldAdaptMTU: true,
 		},
 		{
-			name: "tunnel enabled, validation function",
-			ucfg: userCfg{TunnelProtocol: string(Geneve)},
-			enablers: []any{enabler(true, WithValidator(func(proto Protocol) error {
-				if proto == Geneve {
-					return errors.New("invalid protocol")
-				}
-				return nil
-			}))},
+			name:           "tunnel enabled, auto, request geneve",
+			ucfg:           userCfg{},
+			enablers:       []any{enabler(true, WithProtocol("foo", Geneve))},
+			enabled:        true,
+			proto:          Geneve,
+			port:           defaults.TunnelPortGeneve,
+			deviceName:     defaults.GeneveDevice,
+			shouldAdaptMTU: true,
+		},
+		{
+			name:      "tunnel enabled, vxlan, request geneve",
+			ucfg:      userCfg{TunnelProtocol: string(VXLAN)},
+			enablers:  []any{enabler(true, WithProtocol("foo", Geneve))},
+			shallFail: true,
+		},
+		{
+			name: "tunnel enabled, auto, request vxlan, request geneve",
+			ucfg: userCfg{TunnelProtocol: string(VXLAN)},
+			enablers: []any{
+				enabler(true, WithProtocol("foo", Geneve)),
+				enabler(true, WithProtocol("bar", Geneve)),
+			},
 			shallFail: true,
 		},
 		{
 			name:           "tunnel enabled, don't need MTU adaptation, one",
 			ucfg:           userCfg{TunnelProtocol: string(Geneve)},
 			enablers:       []any{enabler(true, WithoutMTUAdaptation()), enabler(true)},
+			enabled:        true,
 			proto:          Geneve,
 			port:           defaults.TunnelPortGeneve,
 			deviceName:     defaults.GeneveDevice,
@@ -107,6 +136,7 @@ func TestConfig(t *testing.T) {
 			name:           "tunnel enabled, don't need MTU adaptation, all",
 			ucfg:           userCfg{TunnelProtocol: string(Geneve)},
 			enablers:       []any{enabler(true, WithoutMTUAdaptation()), enabler(false)},
+			enabled:        true,
 			proto:          Geneve,
 			port:           defaults.TunnelPortGeneve,
 			deviceName:     defaults.GeneveDevice,
@@ -131,6 +161,7 @@ func TestConfig(t *testing.T) {
 			}
 
 			assert.NoError(t, err)
+			assert.Equal(t, tt.enabled, out.Enabled())
 			assert.Equal(t, tt.proto, out.Protocol())
 			assert.Equal(t, tt.port, out.Port())
 			assert.Equal(t, tt.deviceName, out.DeviceName())
@@ -142,17 +173,19 @@ func TestConfig(t *testing.T) {
 func TestConfigDatapathProvider(t *testing.T) {
 	tests := []struct {
 		name     string
+		enabled  bool
 		proto    Protocol
 		expected dpcfgdef.Map
 	}{
 		{
 			name:     "disabled",
-			proto:    Disabled,
+			enabled:  false,
 			expected: dpcfgdef.Map{},
 		},
 		{
-			name:  "vxlan",
-			proto: VXLAN,
+			name:    "vxlan",
+			enabled: true,
+			proto:   VXLAN,
 			expected: dpcfgdef.Map{
 				"TUNNEL_PROTOCOL_VXLAN":  "1",
 				"TUNNEL_PROTOCOL_GENEVE": "2",
@@ -161,8 +194,9 @@ func TestConfigDatapathProvider(t *testing.T) {
 			},
 		},
 		{
-			name:  "geneve",
-			proto: Geneve,
+			name:    "geneve",
+			enabled: true,
+			proto:   Geneve,
 			expected: dpcfgdef.Map{
 				"TUNNEL_PROTOCOL_VXLAN":  "1",
 				"TUNNEL_PROTOCOL_GENEVE": "2",
@@ -175,6 +209,7 @@ func TestConfigDatapathProvider(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			out, _ := Config{
+				enabled:    tt.enabled,
 				protocol:   tt.proto,
 				port:       1234,
 				deviceName: "device",

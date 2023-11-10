@@ -24,9 +24,6 @@ const (
 
 	// Geneve specifies Geneve encapsulation
 	Geneve Protocol = "geneve"
-
-	// Disabled specifies to disable encapsulation
-	Disabled Protocol = ""
 )
 
 func (tp Protocol) String() string { return string(tp) }
@@ -46,6 +43,7 @@ func (tp Protocol) toDpID() string {
 // depending on the user configuration and optional overrides required by
 // additional features.
 type Config struct {
+	enabled        bool
 	protocol       Protocol
 	port           uint16
 	deviceName     string
@@ -60,13 +58,16 @@ type newConfigIn struct {
 }
 
 func newConfig(in newConfigIn) (Config, error) {
+	const auto = "" // The protocol is defaulted automatically based on requests
+
 	switch Protocol(in.Cfg.TunnelProtocol) {
-	case VXLAN, Geneve:
+	case VXLAN, Geneve, auto:
 	default:
 		return Config{}, fmt.Errorf("invalid tunnel protocol %q", in.Cfg.TunnelProtocol)
 	}
 
 	cfg := Config{
+		enabled:  true,
 		protocol: Protocol(in.Cfg.TunnelProtocol),
 		port:     in.Cfg.TunnelPort,
 	}
@@ -75,18 +76,26 @@ func newConfig(in newConfigIn) (Config, error) {
 	for _, e := range in.Enablers {
 		if e.enable {
 			enabled = true
-			cfg.shouldAdaptMTU = cfg.shouldAdaptMTU || e.needsMTUAdaptation
 
-			for _, validator := range e.validators {
-				if err := validator(cfg.protocol); err != nil {
-					return Config{}, err
+			if e.protocol != auto {
+				if cfg.protocol == auto {
+					cfg.protocol = e.protocol
+				} else if cfg.protocol != e.protocol {
+					return Config{}, fmt.Errorf("%s requires %s tunnel protocol, currently set to %s",
+						e.feature, e.protocol, cfg.protocol)
 				}
 			}
+
+			cfg.shouldAdaptMTU = cfg.shouldAdaptMTU || e.needsMTUAdaptation
 		}
 	}
 
 	if !enabled {
-		return Config{protocol: Disabled}, nil
+		return Config{enabled: false}, nil
+	}
+
+	if cfg.protocol == auto {
+		cfg.protocol = VXLAN
 	}
 
 	switch cfg.protocol {
@@ -123,10 +132,12 @@ func NewTestConfig(proto Protocol) Config {
 	return cfg
 }
 
-// Protocol returns the enabled tunnel protocol. The tunnel protocol may be
-// set to either VXLAN or Geneve even when the primary mode is native routing, in
-// case an additional feature (e.g., egress gateway) may request some traffic to
-// be routed through a tunnel.
+// Enabled returns whether tunneling is enabled. Tunneling may be enabled even
+// when the primary mode is native routing, in case an additional feature (e.g.,
+// egress gateway) may request some traffic to be routed through a tunnel.
+func (cfg Config) Enabled() bool { return cfg.enabled }
+
+// Protocol returns the protocol used by the tunnel (empty) if disabled)
 func (cfg Config) Protocol() Protocol { return cfg.protocol }
 
 // Port returns the port used by the tunnel (0 if disabled).
@@ -143,7 +154,7 @@ func (cfg Config) datapathConfigProvider() (dpcfgdef.NodeOut, dpcfgdef.NodeFnOut
 	defines := make(dpcfgdef.Map)
 	definesFn := func() (dpcfgdef.Map, error) { return nil, nil }
 
-	if cfg.Protocol() != Disabled {
+	if cfg.Enabled() {
 		defines[fmt.Sprintf("TUNNEL_PROTOCOL_%s", strings.ToUpper(VXLAN.String()))] = VXLAN.toDpID()
 		defines[fmt.Sprintf("TUNNEL_PROTOCOL_%s", strings.ToUpper(Geneve.String()))] = Geneve.toDpID()
 		defines["TUNNEL_PROTOCOL"] = cfg.Protocol().toDpID()
@@ -186,9 +197,14 @@ func NewEnabler(enable bool, opts ...enablerOpt) EnablerOut {
 // WithValidator allows to register extra validation functions
 // to assert that the configured tunnel protocol matches the one expected by
 // the given feature.
-func WithValidator(validator func(Protocol) error) enablerOpt {
-	return func(te *enabler) {
-		te.validators = append(te.validators, validator)
+
+// WithProtocol specifies that the given feature requests a specific tunnel
+// protocol. The protocol gets defaulted if possible and validated (i.e.,
+// returning an error in case of mismatch),
+func WithProtocol(feature string, protocol Protocol) enablerOpt {
+	return func(e *enabler) {
+		e.feature = feature
+		e.protocol = protocol
 	}
 }
 
@@ -202,8 +218,9 @@ func WithoutMTUAdaptation() enablerOpt {
 
 type enabler struct {
 	enable             bool
+	protocol           Protocol
+	feature            string
 	needsMTUAdaptation bool
-	validators         []func(Protocol) error
 }
 
 type enablerOpt func(*enabler)
@@ -216,6 +233,6 @@ type userCfg struct {
 
 // Flags implements the cell.Flagger interface, to register the given flags.
 func (def userCfg) Flags(flags *pflag.FlagSet) {
-	flags.String("tunnel-protocol", def.TunnelProtocol, "Encapsulation protocol to use for the overlay (\"vxlan\" or \"geneve\")")
+	flags.String("tunnel-protocol", def.TunnelProtocol, "Encapsulation protocol to use for the overlay (\"vxlan\" or \"geneve\", unset means auto)")
 	flags.Uint16("tunnel-port", def.TunnelPort, fmt.Sprintf("Tunnel port (default %d for \"vxlan\" and %d for \"geneve\")", defaults.TunnelPortVXLAN, defaults.TunnelPortGeneve))
 }

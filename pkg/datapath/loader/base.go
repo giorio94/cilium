@@ -199,9 +199,8 @@ func (l *Loader) reinitializeIPSec(ctx context.Context) error {
 }
 
 func (l *Loader) reinitializeOverlay(ctx context.Context, tunnelConfig tunnel.Config) error {
-	// tunnelConfig.Protocol() can be one of tunnel.[Disabled, VXLAN, Geneve]
-	// if it is disabled, the overlay network programs don't have to be (re)initialized
-	if tunnelConfig.Protocol() == tunnel.Disabled {
+	// If tunneling is disabled, the overlay network programs don't have to be (re)initialized
+	if !tunnelConfig.Enabled() {
 		return nil
 	}
 
