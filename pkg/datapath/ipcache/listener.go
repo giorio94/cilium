@@ -36,6 +36,12 @@ type monitorNotify interface {
 	SendEvent(typ int, event interface{}) error
 }
 
+type ipcmap interface {
+	Update(key bpf.MapKey, value bpf.MapValue) error
+	Delete(key bpf.MapKey) error
+	DumpWithCallback(cb bpf.DumpCallback) error
+}
+
 // BPFListener implements the ipcache.IPIdentityMappingBPFListener
 // interface with an IPCache store that is backed by BPF maps.
 //
@@ -45,7 +51,7 @@ type monitorNotify interface {
 type BPFListener struct {
 	// bpfMap is the BPF map that this listener will update when events are
 	// received from the IPCache.
-	bpfMap *ipcacheMap.Map
+	bpfMap ipcmap
 
 	// monitorNotify is used to notify the monitor about ipcache updates
 	monitorNotify monitorNotify
@@ -53,7 +59,7 @@ type BPFListener struct {
 	ipcache *ipcache.IPCache
 }
 
-func newListener(m *ipcacheMap.Map, mn monitorNotify, ipc *ipcache.IPCache) *BPFListener {
+func newListener(m ipcmap, mn monitorNotify, ipc *ipcache.IPCache) *BPFListener {
 	return &BPFListener{
 		bpfMap:        m,
 		monitorNotify: mn,
