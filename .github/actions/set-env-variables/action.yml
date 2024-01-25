@@ -15,3 +15,4 @@ runs:
         CILIUM_CLI_VERSION="v0.15.20"
         echo "CILIUM_CLI_VERSION=$CILIUM_CLI_VERSION" >> $GITHUB_ENV
         echo "PUSH_TO_DOCKER_HUB=true" >> $GITHUB_ENV
+        echo "GH_RUNNERS_CLUSTERMESH=ubuntu-20.04" >> $GITHUB_ENV

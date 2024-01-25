@@ -78,9 +78,28 @@ jobs:
         with:
           sha: ${{ inputs.SHA || github.sha }}
 
+  retrieve-runner-type:
+    name: Retrieve runner type
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ env.GH_RUNNERS_CLUSTERMESH }}
+    steps:
+      - name: Checkout context ref (trusted)
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          ref: ${{ inputs.context-ref || github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/set-env-variables
+
+      - name: Set Environment Variables
+        uses: ./.github/actions/set-env-variables
+
   upgrade-and-downgrade:
     name: "Upgrade and Downgrade Test"
-    runs-on: ${{ vars.GH_RUNNERS_CLUSTERMESH }}
+    runs-on: ${{ needs.retrieve-runner-type.outputs.runner }}
+    needs:
+    - retrieve-runner-type
     timeout-minutes: 60
     env:
       job_name: "Installation and Connectivity Test"
