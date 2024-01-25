@@ -22,6 +22,7 @@ on:
     branches:
       - main
       - ft/main/**
+      - pr/giorio94/**
     paths-ignore:
       - 'Documentation/**'
 
