@@ -8,6 +8,7 @@ import (
 
 	"github.com/cilium/cilium/pkg/clustermesh/common"
 	"github.com/cilium/cilium/pkg/clustermesh/types"
+	"github.com/cilium/cilium/pkg/clustermesh/wait"
 	"github.com/cilium/cilium/pkg/hive/cell"
 	identityCache "github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/ipcache"
@@ -79,18 +80,22 @@ func (km *KVStoreMesh) Stop(cell.HookContext) error {
 func (km *KVStoreMesh) newRemoteCluster(name string, _ common.StatusFunc) common.RemoteCluster {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	synced := newSynced()
 	rc := &remoteCluster{
 		name:         name,
 		localBackend: km.backend,
 
 		cancel: cancel,
 
-		nodes:        newReflector(km.backend, name, nodeStore.NodeStorePrefix, km.storeFactory),
-		services:     newReflector(km.backend, name, serviceStore.ServiceStorePrefix, km.storeFactory),
-		identities:   newReflector(km.backend, name, identityCache.IdentitiesPath, km.storeFactory),
-		ipcache:      newReflector(km.backend, name, ipcache.IPIdentitiesPath, km.storeFactory),
+		nodes:        newReflector(km.backend, name, nodeStore.NodeStorePrefix, km.storeFactory, synced.resources),
+		services:     newReflector(km.backend, name, serviceStore.ServiceStorePrefix, km.storeFactory, synced.resources),
+		identities:   newReflector(km.backend, name, identityCache.IdentitiesPath, km.storeFactory, synced.resources),
+		ipcache:      newReflector(km.backend, name, ipcache.IPIdentitiesPath, km.storeFactory, synced.resources),
 		storeFactory: km.storeFactory,
+
+		synced: synced,
 	}
+	synced.Stop()
 
 	run := func(fn func(context.Context)) {
 		rc.wg.Add(1)
@@ -105,5 +110,18 @@ func (km *KVStoreMesh) newRemoteCluster(name string, _ common.StatusFunc) common
 	run(rc.identities.syncer.Run)
 	run(rc.ipcache.syncer.Run)
 
+	run(rc.ticker)
+
 	return rc
+}
+
+func (km *KVStoreMesh) Synced(ctx context.Context) error {
+	waiters := make([]wait.Fn, 0)
+	km.common.ForEachRemoteCluster(func(rci common.RemoteCluster) error {
+		rc := rci.(*remoteCluster)
+		waiters = append(waiters, rc.synced.Resources)
+		return nil
+	})
+
+	return wait.ForAll(ctx, waiters)
 }

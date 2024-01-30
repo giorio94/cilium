@@ -8,13 +8,16 @@ import (
 	"fmt"
 	"path"
 	"sync"
+	"time"
 
 	"github.com/cilium/cilium/pkg/clustermesh/types"
 	cmutils "github.com/cilium/cilium/pkg/clustermesh/utils"
+	"github.com/cilium/cilium/pkg/clustermesh/wait"
 	identityCache "github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/ipcache"
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/kvstore/store"
+	"github.com/cilium/cilium/pkg/lock"
 	nodeStore "github.com/cilium/cilium/pkg/node/store"
 	serviceStore "github.com/cilium/cilium/pkg/service/store"
 )
@@ -35,9 +38,18 @@ type remoteCluster struct {
 	wg     sync.WaitGroup
 
 	storeFactory store.Factory
+
+	// synced tracks the initial synchronization with the remote cluster.
+	synced synced
 }
 
 func (rc *remoteCluster) Run(ctx context.Context, backend kvstore.BackendOperations, srccfg *types.CiliumClusterConfig, ready chan<- error) {
+	select {
+	case <-rc.synced.connected:
+	default:
+		close(rc.synced.connected)
+	}
+
 	dstcfg := types.CiliumClusterConfig{
 		Capabilities: types.CiliumClusterConfigCapabilities{
 			SyncedCanaries: true,
@@ -106,6 +118,7 @@ func (rc *remoteCluster) Run(ctx context.Context, backend kvstore.BackendOperati
 func (rc *remoteCluster) Stop() {
 	rc.cancel()
 	rc.wg.Wait()
+	rc.synced.Stop()
 }
 
 func (rc *remoteCluster) Remove() {
@@ -115,6 +128,22 @@ func (rc *remoteCluster) Remove() {
 
 func (rc *remoteCluster) ClusterConfigRequired() bool { return false }
 
+func (rc *remoteCluster) ticker(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+	case <-rc.synced.connected:
+	case <-time.After(1 * time.Minute):
+		for {
+			select {
+			case <-rc.synced.resources.WaitChannel():
+				return
+			default:
+				rc.synced.resources.Done()
+			}
+		}
+	}
+}
+
 type reflector struct {
 	watcher store.WatchStore
 	syncer  syncer
@@ -122,6 +151,7 @@ type reflector struct {
 
 type syncer struct {
 	store.SyncStore
+	synced *lock.StoppableWaitGroup
 }
 
 func (o *syncer) OnUpdate(key store.Key) {
@@ -133,14 +163,17 @@ func (o *syncer) OnDelete(key store.NamedKey) {
 }
 
 func (o *syncer) OnSync(ctx context.Context) {
-	o.Synced(ctx)
+	o.Synced(ctx, func(ctx context.Context) { o.synced.Done() })
 }
 
-func newReflector(local kvstore.BackendOperations, cluster, prefix string, factory store.Factory) reflector {
+func newReflector(local kvstore.BackendOperations, cluster, prefix string, factory store.Factory, synced *lock.StoppableWaitGroup) reflector {
+	synced.Add()
+
 	prefix = kvstore.StateToCachePrefix(prefix)
 	syncer := syncer{
 		SyncStore: factory.NewSyncStore(cluster, local, path.Join(prefix, cluster),
 			store.WSSWithSyncedKeyOverride(prefix)),
+		synced: synced,
 	}
 
 	watcher := factory.NewWatchStore(cluster, store.KVPairCreator, &syncer,
@@ -151,4 +184,22 @@ func newReflector(local kvstore.BackendOperations, cluster, prefix string, facto
 		syncer:  syncer,
 		watcher: watcher,
 	}
+}
+
+type synced struct {
+	wait.SyncedCommon
+	connected chan struct{}
+	resources *lock.StoppableWaitGroup
+}
+
+func newSynced() synced {
+	return synced{
+		SyncedCommon: wait.NewSyncedCommon(),
+		connected:    make(chan struct{}),
+		resources:    lock.NewStoppableWaitGroup(),
+	}
+}
+
+func (s *synced) Resources(ctx context.Context) error {
+	return s.Wait(ctx, s.resources.WaitChannel())
 }

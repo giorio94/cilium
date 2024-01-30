@@ -5,7 +5,6 @@ package clustermesh
 
 import (
 	"context"
-	"errors"
 	"path"
 
 	"github.com/cilium/cilium/api/v1/models"
@@ -13,6 +12,7 @@ import (
 	"github.com/cilium/cilium/pkg/clustermesh/common"
 	"github.com/cilium/cilium/pkg/clustermesh/types"
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
+	"github.com/cilium/cilium/pkg/clustermesh/wait"
 	identityCache "github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/ipcache"
 	"github.com/cilium/cilium/pkg/kvstore"
@@ -130,7 +130,7 @@ func (rc *remoteCluster) Run(ctx context.Context, backend kvstore.BackendOperati
 }
 
 func (rc *remoteCluster) Stop() {
-	rc.synced.stop()
+	rc.synced.Stop()
 }
 
 func (rc *remoteCluster) Remove() {
@@ -211,18 +211,12 @@ func (rc *remoteCluster) ipCacheWatcherOpts(config *cmtypes.CiliumClusterConfig)
 	return opts
 }
 
-var (
-	// ErrRemoteClusterDisconnected is the error returned by wait for sync
-	// operations if the remote cluster is disconnected while still waiting.
-	ErrRemoteClusterDisconnected = errors.New("remote cluster disconnected")
-)
-
 type synced struct {
+	wait.SyncedCommon
 	services   *lock.StoppableWaitGroup
 	nodes      chan struct{}
 	ipcache    chan struct{}
 	identities *lock.StoppableWaitGroup
-	stopped    chan struct{}
 }
 
 func newSynced() synced {
@@ -235,11 +229,11 @@ func newSynced() synced {
 	idswg.Stop()
 
 	return synced{
-		services:   lock.NewStoppableWaitGroup(),
-		nodes:      make(chan struct{}),
-		ipcache:    make(chan struct{}),
-		identities: idswg,
-		stopped:    make(chan struct{}),
+		SyncedCommon: wait.NewSyncedCommon(),
+		services:     lock.NewStoppableWaitGroup(),
+		nodes:        make(chan struct{}),
+		ipcache:      make(chan struct{}),
+		identities:   idswg,
 	}
 }
 
@@ -247,14 +241,14 @@ func newSynced() synced {
 // from the remote cluster, and synchronized with the different subscribers,
 // the remote cluster is disconnected, or the given context is canceled.
 func (s *synced) Nodes(ctx context.Context) error {
-	return s.wait(ctx, s.nodes)
+	return s.Wait(ctx, s.nodes)
 }
 
 // Services returns after that the initial list of shared services has been
 // received from the remote cluster, and synchronized with the BPF datapath,
 // the remote cluster is disconnected, or the given context is canceled.
 func (s *synced) Services(ctx context.Context) error {
-	return s.wait(ctx, s.services.WaitChannel())
+	return s.Wait(ctx, s.services.WaitChannel())
 }
 
 // IPIdentities returns after that the initial list of ipcache entries and
@@ -264,24 +258,5 @@ func (s *synced) Services(ctx context.Context) error {
 // synchronization because they also trigger the insertion of ipcache entries
 // (i.e., node addresses, health, ingress, ...).
 func (s *synced) IPIdentities(ctx context.Context) error {
-	return s.wait(ctx, s.ipcache, s.identities.WaitChannel(), s.nodes)
-}
-
-func (s *synced) wait(ctx context.Context, chs ...<-chan struct{}) error {
-	for _, ch := range chs {
-		select {
-		case <-ch:
-			continue
-		case <-s.stopped:
-			return ErrRemoteClusterDisconnected
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	return nil
-}
-
-func (s *synced) stop() {
-	close(s.stopped)
+	return s.Wait(ctx, s.ipcache, s.identities.WaitChannel(), s.nodes)
 }
