@@ -5,13 +5,19 @@ package kvstoremesh
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/cilium/hive/cell"
+	"github.com/cilium/hive/hivetest"
+	"github.com/cilium/hive/job"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,10 +27,12 @@ import (
 	"github.com/cilium/cilium/pkg/clustermesh/common"
 	"github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/clustermesh/utils"
+	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/promise"
 	"github.com/cilium/cilium/pkg/testutils"
 )
 
@@ -89,6 +97,9 @@ func (w *remoteEtcdClientWrapper) ListAndWatch(ctx context.Context, prefix strin
 
 func TestRemoteClusterRun(t *testing.T) {
 	testutils.IntegrationTest(t)
+
+	defer func(old time.Duration) { drainGracePeriod = old }(drainGracePeriod)
+	drainGracePeriod = 0 * time.Second
 
 	kvstore.SetupDummyWithConfigOpts(t, "etcd",
 		// Explicitly set higher QPS than the default to speedup the test
@@ -202,8 +213,16 @@ func TestRemoteClusterRun(t *testing.T) {
 				cached:            tt.srccfg.Capabilities.Cached,
 				kvs:               tt.kvs,
 			}
+
+			var jg job.Group
+			require.NoError(t, hive.New(cell.Invoke(func(jr job.Registry) {
+				h, _ := cell.NewSimpleHealth()
+				jg = jr.NewGroup(h)
+			})).Populate(hivetest.Logger(t)), "Failed to retrieve job group")
+
 			st := store.NewFactory(store.MetricsProvider())
-			km := KVStoreMesh{backend: kvstore.Client(), storeFactory: st, logger: logrus.New()}
+			km := KVStoreMesh{backend: kvstore.Client(), storeFactory: st, logger: logrus.New(), jobGroup: jg}
+			hivetest.Lifecycle(t).Append(jg)
 
 			rc := km.newRemoteCluster("foo", nil)
 			ready := make(chan error)
@@ -254,8 +273,215 @@ func TestRemoteClusterRun(t *testing.T) {
 
 			// Assert that synced canaries have been watched if expected
 			require.Equal(t, tt.srccfg.Capabilities.SyncedCanaries, remoteClient.syncedCanariesWatched)
+
+			cancel()
+			wg.Wait()
+
+			// Assert that Remove() removes all keys previously created
+			rc.Remove(context.Background())
+
+			pairs, err := kvstore.Client().ListPrefix(context.Background(), kvstore.BaseKeyPrefix)
+			require.NoError(t, err, "Failed to retrieve kvstore keys")
+			require.Empty(t, pairs, "Cached keys not correctly removed")
 		})
 	}
+}
+
+type localClientWrapper struct {
+	kvstore.BackendOperations
+	errors map[string]uint
+}
+
+func (lcw *localClientWrapper) Delete(ctx context.Context, key string) error {
+	if cnt := lcw.errors[key]; cnt > 0 {
+		lcw.errors[key] = cnt - 1
+		return errors.New("fake error")
+	}
+
+	return lcw.BackendOperations.Delete(ctx, key)
+}
+
+func (lcw *localClientWrapper) DeletePrefix(ctx context.Context, path string) error {
+	if cnt := lcw.errors[path]; cnt > 0 {
+		lcw.errors[path] = cnt - 1
+		return errors.New("fake error")
+	}
+
+	return lcw.BackendOperations.DeletePrefix(ctx, path)
+}
+
+func TestRemoteClusterRemove(t *testing.T) {
+	testutils.IntegrationTest(t)
+
+	defer func(old time.Duration) { drainGracePeriod = old }(drainGracePeriod)
+	drainGracePeriod = 0 * time.Second
+
+	ctx := context.Background()
+	kvstore.SetupDummyWithConfigOpts(t, "etcd",
+		// Explicitly set higher QPS than the default to speedup the test
+		map[string]string{kvstore.EtcdRateLimitOption: "100"},
+	)
+
+	keys := func(name string) []string {
+		return []string{
+			fmt.Sprintf("cilium/cluster-config/%s", name),
+			fmt.Sprintf("cilium/cache/nodes/v1/%s/bar", name),
+			fmt.Sprintf("cilium/cache/services/v1/%s/bar", name),
+			fmt.Sprintf("cilium/cache/identities/v1/%s/bar", name),
+			fmt.Sprintf("cilium/cache/ip/v1/%s/bar", name),
+			fmt.Sprintf("cilium/synced/%s/cilium/cache/nodes/v1", name),
+			fmt.Sprintf("cilium/synced/%s/cilium/cache/services/v1", name),
+			fmt.Sprintf("cilium/synced/%s/cilium/cache/identities/v1", name),
+			fmt.Sprintf("cilium/synced/%s/cilium/cache/ip/v1", name),
+		}
+	}
+
+	closed := func(ch <-chan struct{}) bool {
+		select {
+		case <-ch:
+			return true
+		default:
+			return false
+		}
+	}
+
+	wrapper := &localClientWrapper{
+		BackendOperations: kvstore.Client(),
+		errors: map[string]uint{
+			"cilium/cache/identities/v1/foobar/": 1,
+			"cilium/cluster-config/baz":          2,
+		},
+	}
+
+	st := store.NewFactory(store.MetricsProvider())
+	km := KVStoreMesh{backend: wrapper, storeFactory: st, logger: logrus.New()}
+	rcs := make(map[string]*remoteCluster)
+	for _, cluster := range []string{"foo", "foobar", "baz"} {
+		rcs[cluster] = km.newRemoteCluster(cluster, nil).(*remoteCluster)
+		rcs[cluster].Stop()
+	}
+
+	for _, rc := range rcs {
+		for _, key := range keys(rc.name) {
+			require.NoError(t, kvstore.Client().Update(ctx, key, []byte("value"), false))
+		}
+	}
+
+	fn, done := rcs["foo"].drainJobFn(1)
+	require.NoError(t, fn(ctx, nil), "Draining should have succeeded")
+	require.True(t, closed(done), "The drain function should have reported completion")
+
+	for _, key := range keys("foo") {
+		value, err := kvstore.Client().Get(ctx, key)
+		require.NoError(t, err, "Failed to retrieve kvstore key %s", key)
+		require.Empty(t, string(value), "Key %s has not been deleted", key)
+	}
+
+	for _, cluster := range []string{"foobar", "baz"} {
+		for _, key := range keys(cluster) {
+			value, err := kvstore.Client().Get(ctx, key)
+			require.NoError(t, err, "Failed to retrieve kvstore key %s", key)
+			require.NotEmpty(t, string(value), "Key %s has been incorrectly deleted", key)
+		}
+	}
+
+	// Simulate the failure of one of the delete calls
+	fn, done = rcs["foobar"].drainJobFn(1)
+	require.Error(t, fn(ctx, nil), "Draining should have failed")
+	require.False(t, closed(done), "The drain function should not have reported completion")
+
+	require.NoError(t, fn(ctx, nil), "Draining should now have succeeded")
+	require.True(t, closed(done), "The drain function should have reported completion")
+
+	for _, key := range keys("foobar") {
+		value, err := kvstore.Client().Get(ctx, key)
+		require.NoError(t, err, "Failed to retrieve kvstore key %s", key)
+		require.Empty(t, string(value), "Key %s has not been deleted", key)
+	}
+
+	// Simulate the persistent failure of one of the delete calls
+	fn, done = rcs["baz"].drainJobFn(1)
+	require.Error(t, fn(ctx, nil), "Draining should have failed")
+	require.False(t, closed(done), "The drain function should not have reported completion")
+
+	require.Error(t, fn(ctx, nil), "Draining should have failed again")
+	require.True(t, closed(done), "The drain function should have reported completion")
+
+	// The context expired
+	cctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	fn, done = rcs["baz"].drainJobFn(1)
+	require.NoError(t, fn(cctx, nil), "Draining should not have returned an error")
+	require.True(t, closed(done), "The drain function should have reported completion")
+}
+
+func TestRemoteClusterRemoveShutdown(t *testing.T) {
+	// Test that KVStoreMesh shutdown process is not blocked by possible
+	// in-progress remote cluster removals.
+	testutils.IntegrationTest(t)
+
+	defer func(old time.Duration) { drainGracePeriod = old }(drainGracePeriod)
+	drainGracePeriod = 10 * time.Minute
+
+	ctx := context.Background()
+	kvstore.SetupDummyWithConfigOpts(t, "etcd",
+		// Explicitly set higher QPS than the default to speedup the test
+		map[string]string{kvstore.EtcdRateLimitOption: "100"},
+	)
+
+	dir := t.TempDir()
+	cfg := []byte(fmt.Sprintf("endpoints:\n- %s\n", kvstore.EtcdDummyAddress()))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "remote"), cfg, 0644))
+
+	// Let's manually create a fake cluster configuration for the remote cluster,
+	// because we are using the same kvstore. This will be used as a synchronization
+	// point to stop the hive while blocked waiting for the grace period.
+	require.NoError(t, utils.SetClusterConfig(ctx, "remote", types.CiliumClusterConfig{ID: 20}, kvstore.Client()))
+
+	var km *KVStoreMesh
+	h := hive.New(
+		Cell,
+
+		cell.Provide(
+			func() types.ClusterInfo { return types.ClusterInfo{ID: 10, Name: "local"} },
+			func() Config { return Config{} },
+			func() promise.Promise[kvstore.BackendOperations] {
+				clr, clp := promise.New[kvstore.BackendOperations]()
+				clr.Resolve(kvstore.Client())
+				return clp
+			},
+		),
+
+		cell.Invoke(func(km_ *KVStoreMesh) { km = km_ }),
+	)
+	hive.AddConfigOverride(h, func(cfg *common.Config) { cfg.ClusterMeshConfig = dir })
+
+	tlog := hivetest.Logger(t)
+	require.NoError(t, h.Start(tlog, ctx), "Failed to start the hive")
+
+	// Wait until the connection has been successfully established, before disconnecting.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		status := km.status()
+		if assert.Len(c, status, 1) {
+			assert.True(c, status[0].Ready)
+		}
+	}, timeout, tick, "Failed to connect to the remote cluster")
+
+	require.NoError(t, os.Remove(filepath.Join(dir, "remote")))
+
+	// Wait until the cluster config key has been removed, to ensure that we are
+	// actually waiting for the grace period expiration.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		key := path.Join(kvstore.ClusterConfigPrefix, "remote")
+		value, err := kvstore.Client().Get(ctx, key)
+		assert.NoError(c, err, "Failed to retrieve kvstore key %s", key)
+		assert.Empty(c, string(value), "Key %s has not been deleted", key)
+	}, timeout, tick)
+
+	sctx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	require.NoError(t, h.Stop(tlog, sctx), "Failed to stop the hive")
 }
 
 func TestRemoteClusterStatus(t *testing.T) {

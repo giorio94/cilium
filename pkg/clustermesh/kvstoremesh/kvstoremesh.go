@@ -32,6 +32,8 @@ import (
 type Config struct {
 	PerClusterReadyTimeout time.Duration
 	GlobalReadyTimeout     time.Duration
+
+	DisableDrainOnDisconnection bool
 }
 
 var DefaultConfig = Config{
@@ -42,6 +44,9 @@ var DefaultConfig = Config{
 func (def Config) Flags(flags *pflag.FlagSet) {
 	flags.Duration("per-cluster-ready-timeout", def.PerClusterReadyTimeout, "Remote clusters will be disregarded for readiness checks if a connection cannot be established within this duration")
 	flags.Duration("global-ready-timeout", def.GlobalReadyTimeout, "KVStoreMesh will be considered ready even if any remote clusters have failed to synchronize within this duration")
+
+	flags.Bool("disable-drain-on-disconnection", def.DisableDrainOnDisconnection, "Do not drain cached data upon cluster disconnection")
+	flags.MarkHidden("disable-drain-on-disconnection")
 }
 
 // KVStoreMesh is a cache of multiple remote clusters
@@ -153,6 +158,8 @@ func (km *KVStoreMesh) newRemoteCluster(name string, status common.StatusFunc) c
 		synced:       synced,
 		readyTimeout: km.config.PerClusterReadyTimeout,
 		logger:       km.logger.WithField(logfields.ClusterName, name),
+
+		disableDrainOnDisconnection: km.config.DisableDrainOnDisconnection,
 	}
 
 	run := func(fn func(context.Context)) {
