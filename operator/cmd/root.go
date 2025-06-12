@@ -285,6 +285,9 @@ var (
 			}),
 			operatorWatchers.ServiceSyncCell,
 
+			// Synchronizes K8s ServiceExports to KVStore
+			mcsapi.ServiceExportSyncCell,
+
 			// Cilium L7 LoadBalancing with Envoy.
 			ciliumenvoyconfig.Cell,
 
@@ -533,7 +536,6 @@ func registerLegacyOnLeader(lc cell.Lifecycle, clientset k8sClient.Clientset, kv
 		clientset:            clientset,
 		kvstoreClient:        kvstoreClient,
 		resources:            resources,
-		storeFactory:         factory,
 		cfgMCSAPI:            cfgMCSAPI,
 		cfgClusterMeshPolicy: cfgClusterMeshPolicy,
 		metrics:              metrics,
@@ -634,24 +636,6 @@ func (legacy *legacyOnLeader) onStart(_ cell.HookContext) error {
 	}
 
 	if legacy.kvstoreClient.IsEnabled() {
-		if legacy.clientset.IsEnabled() && operatorOption.Config.SyncK8sServices {
-			legacy.wg.Add(1)
-			go func() {
-				mcsapi.StartSynchronizingServiceExports(legacy.ctx, mcsapi.ServiceExportSyncParameters{
-					Logger:                  legacy.logger,
-					ClusterName:             option.Config.ClusterName,
-					ClusterMeshEnableMCSAPI: legacy.cfgMCSAPI.ClusterMeshEnableMCSAPI,
-					Clientset:               legacy.clientset,
-					Backend:                 legacy.kvstoreClient,
-					ServiceExports:          legacy.resources.ServiceExports,
-					Services:                legacy.resources.Services,
-					StoreFactory:            legacy.storeFactory,
-					SyncCallback:            func(context.Context) {},
-				})
-				legacy.wg.Done()
-			}()
-		}
-
 		if legacy.clientset.IsEnabled() && operatorOption.Config.SyncK8sNodes {
 			withKVStore = true
 		}
