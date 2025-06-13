@@ -4,6 +4,8 @@
 package clustermesh
 
 import (
+	"errors"
+
 	"github.com/cilium/hive/cell"
 
 	cmk8s "github.com/cilium/cilium/clustermesh-apiserver/clustermesh/k8s"
@@ -34,6 +36,14 @@ var Cell = cell.Module(
 
 	k8sClient.Cell,
 	cmk8s.ResourcesCell,
+	cell.Invoke(func(client k8sClient.Clientset) error {
+		// The clustermesh-apiserver depends on the kubernetes client.
+		if !client.IsEnabled() {
+			return errors.New("Kubernetes client not configured, cannot continue")
+		}
+
+		return nil
+	}),
 
 	// Shared synchronization structures for waiting on K8s resources to
 	// be synced
